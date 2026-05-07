@@ -28,6 +28,8 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
   const inputRef = useRef(null)
 
   useEffect(() => {
+    if (!password) return // Skip loading if no password
+    
     // Load saved contacts and messages
     const loadSavedData = async () => {
       try {
