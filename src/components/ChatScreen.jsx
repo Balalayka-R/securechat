@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Shield, Send, Plus, LogOut, Users, Lock, Wifi, WifiOff, Search, X, Info, Copy, Link2, UserPlus, Check } from 'lucide-react'
+import { Shield, Send, Plus, LogOut, Users, Lock, Wifi, WifiOff, Search, X, Info, Copy, Link2, UserPlus, Check, Smile, Forward } from 'lucide-react'
 import { connectSocket, getSocket, disconnectSocket } from '../lib/socket'
 import { deriveSharedKey, encryptMessage, decryptMessage, getKeyFingerprint } from '../lib/crypto'
 import { clearKeys } from '../lib/crypto'
@@ -7,6 +7,7 @@ import { clearIdentity, getAvatarColor, getInitials, loadIdentity } from '../lib
 import { saveMessages, loadMessages, saveContact, loadContacts, clearAllData } from '../lib/storage'
 import ContactAvatar from './ContactAvatar'
 import MessageBubble from './MessageBubble'
+import EmojiPicker from './EmojiPicker'
 import clsx from 'clsx'
 
 export default function ChatScreen({ identity, keys, onLogout, password }) {
@@ -24,6 +25,14 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false)
   const [connectId, setConnectId] = useState('')
   const [showConnect, setShowConnect] = useState(false)
+  const [typingUsers, setTypingUsers] = useState({})
+  const [messageStatus, setMessageStatus] = useState({})
+  const [replyTo, setReplyTo] = useState(null)
+  const [selectedMessage, setSelectedMessage] = useState(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [forwardMessage, setForwardMessage] = useState(null)
+  const [showForwardModal, setShowForwardModal] = useState(false)
+  const typingTimeoutRef = useRef(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -33,6 +42,28 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
 
     socket.on('connect', () => setConnected(true))
     socket.on('disconnect', () => setConnected(false))
+    
+    // Typing indicators
+    socket.on('typing:start', ({ from }) => {
+      setTypingUsers(prev => ({ ...prev, [from]: true }))
+    })
+    
+    socket.on('typing:stop', ({ from }) => {
+      setTypingUsers(prev => ({ ...prev, [from]: false }))
+    })
+    
+    // Delivery and read receipts
+    socket.on('msg:delivered', ({ timestamp }) => {
+      setMessageStatus(prev => ({ ...prev, [timestamp]: 'delivered' }))
+    })
+    
+    socket.on('msg:read', ({ messageIds }) => {
+      setMessageStatus(prev => {
+        const updated = { ...prev }
+        messageIds.forEach(id => { updated[id] = 'read' })
+        return updated
+      })
+    })
     
     // Check notification permission
     if ('Notification' in window) {
@@ -174,6 +205,27 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
     
     // Save contact to storage
     await saveContact(user, password)
+    
+    // Send read receipts for unread messages
+    const socket = getSocket()
+    const chatMessages = chats[user.userId]?.messages || []
+    const unreadIds = chatMessages
+      .filter(m => !m.mine && !m.read)
+      .map(m => m.id)
+    
+    if (unreadIds.length > 0 && socket?.connected) {
+      socket.emit('msg:read', { messageIds: unreadIds, to: user.userId })
+      // Mark as read locally
+      setChats(prev => ({
+        ...prev,
+        [user.userId]: {
+          ...prev[user.userId],
+          messages: chatMessages.map(m => 
+            unreadIds.includes(m.id) ? { ...m, read: true } : m
+          )
+        }
+      }))
+    }
   }
 
   const sendMessage = async () => {
@@ -186,21 +238,37 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
 
     try {
       const encrypted = await encryptMessage(sk, inputText.trim())
+      const timestamp = Date.now()
       const msg = {
-        id: Date.now(),
+        id: timestamp.toString(),
         from: identity.userId,
         fromUsername: identity.username,
         text: inputText.trim(),
-        timestamp: Date.now(),
+        timestamp,
         mine: true
       }
 
-      socket.emit('msg:send', {
+      // Stop typing when sending
+      socket.emit('typing:stop', { to: activeChat.userId })
+      
+      const msgData = {
         to: activeChat.userId,
         encryptedText: encrypted,
         publicKey: JSON.stringify(keys.publicKeyJwk),
         timestamp: msg.timestamp
-      })
+      }
+      
+      // Add reply reference if exists
+      if (replyTo) {
+        msgData.replyTo = {
+          id: replyTo.id,
+          text: replyTo.text.slice(0, 100), // Preview only
+          fromUsername: replyTo.fromUsername
+        }
+        msg.replyTo = msgData.replyTo
+      }
+      
+      socket.emit('msg:send', msgData)
 
       setChats(prev => {
         const updated = {
@@ -212,14 +280,65 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
             messages: [...(prev[activeChat.userId]?.messages || []), msg]
           }
         }
-        // Save sent messages too
         saveMessages(activeChat.userId, updated[activeChat.userId].messages, password).catch(console.error)
         return updated
       })
       setInputText('')
+      setReplyTo(null) // Clear reply after sending
     } catch (e) {
       console.error('Send error:', e)
     }
+  }
+  
+  const deleteMessage = (messageId) => {
+    if (!activeChat) return
+    
+    setChats(prev => {
+      const updatedMessages = prev[activeChat.userId]?.messages?.map(m => 
+        m.id === messageId ? { ...m, deleted: true, text: 'Сообщение удалено' } : m
+      ) || []
+      
+      const updated = {
+        ...prev,
+        [activeChat.userId]: {
+          ...prev[activeChat.userId],
+          messages: updatedMessages
+        }
+      }
+      saveMessages(activeChat.userId, updatedMessages, password).catch(console.error)
+      return updated
+    })
+    setSelectedMessage(null)
+  }
+  
+  const handleReply = (message) => {
+    setReplyTo(message)
+    inputRef.current?.focus()
+  }
+  
+  const cancelReply = () => {
+    setReplyTo(null)
+  }
+  
+  const handleInputChange = (e) => {
+    setInputText(e.target.value)
+    
+    if (!activeChat) return
+    const socket = getSocket()
+    if (!socket?.connected) return
+    
+    // Send typing:start
+    socket.emit('typing:start', { to: activeChat.userId })
+    
+    // Clear previous timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+    }
+    
+    // Send typing:stop after 3 seconds
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit('typing:stop', { to: activeChat.userId })
+    }, 3000)
   }
 
   const handleLogout = () => {
@@ -227,6 +346,86 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
     clearKeys()
     clearIdentity()
     onLogout()
+  }
+  
+  const handleMessageAction = (action, message) => {
+    if (action === 'delete') {
+      deleteMessage(message.id)
+    } else if (action === 'reply') {
+      handleReply(message)
+    } else if (action === 'forward') {
+      setForwardMessage(message)
+      setShowForwardModal(true)
+    }
+    setSelectedMessage(null)
+  }
+  
+  const handleForward = async (targetUser) => {
+    if (!forwardMessage || !targetUser) return
+    
+    const socket = getSocket()
+    if (!socket?.connected) return
+    
+    // Get or create shared key
+    let sk = sharedKeys[targetUser.userId]
+    if (!sk) {
+      try {
+        const theirPubKey = JSON.parse(targetUser.publicKey)
+        sk = await deriveSharedKey(keys.privateKeyJwk, theirPubKey)
+        setSharedKeys(prev => ({ ...prev, [targetUser.userId]: sk }))
+      } catch (e) {
+        console.error('Key derivation error:', e)
+        return
+      }
+    }
+    
+    try {
+      const encrypted = await encryptMessage(sk, `Переслано:\n${forwardMessage.text}`)
+      const timestamp = Date.now()
+      
+      socket.emit('msg:send', {
+        to: targetUser.userId,
+        encryptedText: encrypted,
+        publicKey: JSON.stringify(keys.publicKeyJwk),
+        timestamp
+      })
+      
+      // Add to chat history
+      const msg = {
+        id: timestamp.toString(),
+        from: identity.userId,
+        fromUsername: identity.username,
+        text: `Переслано:\n${forwardMessage.text}`,
+        timestamp,
+        mine: true,
+        forwarded: true
+      }
+      
+      setChats(prev => {
+        const updated = {
+          ...prev,
+          [targetUser.userId]: {
+            userId: targetUser.userId,
+            username: targetUser.username,
+            publicKey: targetUser.publicKey,
+            messages: [...(prev[targetUser.userId]?.messages || []), msg]
+          }
+        }
+        saveMessages(targetUser.userId, updated[targetUser.userId].messages, password).catch(console.error)
+        return updated
+      })
+    } catch (e) {
+      console.error('Forward error:', e)
+    }
+    
+    setForwardMessage(null)
+    setShowForwardModal(false)
+  }
+  
+  const handleEmojiSelect = (emoji) => {
+    setInputText(prev => prev + emoji)
+    setShowEmojiPicker(false)
+    inputRef.current?.focus()
   }
 
   const filteredUsers = onlineUsers.filter(u =>
@@ -427,10 +626,17 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold text-sm truncate">{activeChat.username}</p>
-                <p className="text-xs text-safe flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-safe" />
-                  онлайн
-                </p>
+                {typingUsers[activeChat.userId] ? (
+                  <p className="text-xs text-accent flex items-center gap-1 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+                    печатает...
+                  </p>
+                ) : (
+                  <p className="text-xs text-safe flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-safe" />
+                    онлайн
+                  </p>
+                )}
               </div>
               <button className="p-2 rounded-full hover:bg-dark-800 transition-colors">
                 <Info className="w-5 h-5 text-dark-400" />
@@ -470,6 +676,8 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
                       showTime={showTime}
                       showAvatar={showAvatar}
                       activeChat={activeChat}
+                      status={messageStatus[msg.id] || (msg.mine ? 'sent' : 'read')}
+                      onAction={handleMessageAction}
                     />
                   )
                 })
@@ -479,12 +687,46 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
 
             {/* Input - Telegram style */}
             <div className="p-2 md:p-3 border-t border-dark-800 bg-dark-900/95 backdrop-blur-md safe-area-bottom">
+              {/* Reply preview */}
+              {replyTo && (
+                <div className="flex items-start gap-2 mb-2 px-1 animate-fade-in">
+                  <div className="flex-1 bg-dark-800/50 rounded-lg p-2 text-xs border-l-2 border-accent">
+                    <p className="text-accent font-medium mb-0.5">{replyTo.fromUsername}</p>
+                    <p className="text-dark-400 truncate">{replyTo.text}</p>
+                  </div>
+                  <button 
+                    onClick={cancelReply}
+                    className="p-1 hover:bg-dark-800 rounded transition-colors"
+                  >
+                    <X className="w-4 h-4 text-dark-500" />
+                  </button>
+                </div>
+              )}
               <div className="flex items-end gap-1.5 md:gap-2 bg-dark-800 rounded-2xl md:rounded-3xl px-3 md:px-4 py-2 border border-dark-700 focus-within:border-accent/50 transition-colors min-h-[44px] md:min-h-[48px]">
+                {/* Emoji button */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className="p-2 text-dark-500 hover:text-accent transition-colors"
+                  >
+                    <Smile className="w-5 h-5" />
+                  </button>
+                  
+                  {showEmojiPicker && (
+                    <div className="absolute bottom-full left-0 mb-2 z-50">
+                      <EmojiPicker 
+                        onSelect={handleEmojiSelect}
+                        onClose={() => setShowEmojiPicker(false)}
+                      />
+                    </div>
+                  )}
+                </div>
+                
                 <input
                   ref={inputRef}
                   type="text"
                   value={inputText}
-                  onChange={e => setInputText(e.target.value)}
+                  onChange={handleInputChange}
                   onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
                   placeholder="Сообщение..."
                   className="flex-1 bg-transparent outline-none text-dark-100 placeholder-dark-600 text-base md:text-sm py-1.5 px-1 min-h-[24px]"
@@ -507,6 +749,52 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
                 <Lock className="w-3 h-3" /> AES-256-GCM + ECDH P-256
               </p>
             </div>
+            
+            {/* Forward Modal */}
+            {showForwardModal && (
+              <div className="absolute inset-0 z-50 bg-dark-950/90 flex items-center justify-center p-4">
+                <div className="bg-dark-900 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+                  <div className="p-4 border-b border-dark-800 flex items-center justify-between">
+                    <h3 className="font-semibold">Переслать сообщение</h3>
+                    <button 
+                      onClick={() => setShowForwardModal(false)}
+                      className="p-2 hover:bg-dark-800 rounded-lg"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  
+                  <div className="p-2 bg-dark-800/50">
+                    <p className="text-xs text-dark-400 px-2 py-1 truncate">
+                      {forwardMessage?.text?.slice(0, 60)}...
+                    </p>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto p-2">
+                    <p className="text-xs text-dark-500 px-2 py-2">Выберите получателя:</p>
+                    {onlineUsers.map(user => (
+                      <button
+                        key={user.userId}
+                        onClick={() => handleForward(user)}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-dark-800 transition-colors text-left"
+                      >
+                        <ContactAvatar username={user.username} userId={user.userId} size="md" />
+                        <div>
+                          <p className="font-medium text-sm">{user.username}</p>
+                          <p className="text-xs text-dark-500">
+                            {chats[user.userId]?.messages?.length > 0 ? 'Есть переписка' : 'Новый чат'}
+                          </p>
+                        </div>
+                        <Forward className="w-4 h-4 ml-auto text-accent" />
+                      </button>
+                    ))}
+                    {onlineUsers.length === 0 && (
+                      <p className="text-center text-dark-500 py-8">Нет пользователей онлайн</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">

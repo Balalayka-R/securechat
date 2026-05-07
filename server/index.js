@@ -62,7 +62,7 @@ io.on('connection', (socket) => {
     publicKey: user.publicKey
   })
 
-  socket.on('msg:send', ({ to, encryptedText, publicKey, timestamp }) => {
+  socket.on('msg:send', ({ to, encryptedText, publicKey, timestamp, replyTo }) => {
     const recipient = onlineUsers.get(to)
     if (!recipient) return
 
@@ -71,8 +71,40 @@ io.on('connection', (socket) => {
       fromUsername: socket.username,
       encryptedText,
       publicKey: socket.publicKey,
-      timestamp
+      timestamp,
+      replyTo,
+      messageId: Date.now().toString()
     })
+    
+    // Confirm delivery to sender
+    socket.emit('msg:delivered', { to, timestamp })
+  })
+  
+  // Typing indicator
+  socket.on('typing:start', ({ to }) => {
+    const recipient = onlineUsers.get(to)
+    if (recipient) {
+      io.to(recipient.socketId).emit('typing:start', { from: socket.userId })
+    }
+  })
+  
+  socket.on('typing:stop', ({ to }) => {
+    const recipient = onlineUsers.get(to)
+    if (recipient) {
+      io.to(recipient.socketId).emit('typing:stop', { from: socket.userId })
+    }
+  })
+  
+  // Read receipts
+  socket.on('msg:read', ({ messageIds, to }) => {
+    const recipient = onlineUsers.get(to)
+    if (recipient) {
+      io.to(recipient.socketId).emit('msg:read', { 
+        messageIds, 
+        from: socket.userId,
+        timestamp: Date.now() 
+      })
+    }
   })
 
   socket.on('user:request', ({ targetId }) => {
