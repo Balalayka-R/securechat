@@ -224,18 +224,16 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
     u.username.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const currentMessages = activeChat ? (chats[activeChat.userId]?.messages || []) : []
-
   return (
     <div className="h-screen flex bg-dark-950 overflow-hidden">
-      {/* Sidebar */}
+      {/* Sidebar - optimized for mobile */}
       <div className={clsx(
-        'flex flex-col w-full md:w-80 border-r border-dark-800 flex-shrink-0',
+        'w-full md:w-80 border-r border-dark-800 flex flex-col bg-dark-950 h-screen md:h-auto',
         mobileView === 'chat' ? 'hidden md:flex' : 'flex'
       )}>
         {/* Header */}
         <div className="p-4 border-b border-dark-800">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Shield className="w-5 h-5 text-accent" />
               <span className="font-bold text-sm">SecureChat</span>
@@ -401,42 +399,49 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
 
       {/* Chat area */}
       <div className={clsx(
-        'flex-1 flex flex-col',
+        'flex-1 flex flex-col h-screen md:h-auto',
         mobileView === 'list' ? 'hidden md:flex' : 'flex'
       )}>
         {activeChat ? (
           <>
-            {/* Chat header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-dark-800 glass">
+            {/* Chat header - Telegram style */}
+            <div className="flex items-center gap-3 px-3 py-2.5 border-b border-dark-800 bg-dark-900/95 backdrop-blur-md sticky top-0 z-20">
               <button
                 onClick={() => setMobileView('list')}
-                className="md:hidden btn-ghost p-2"
+                className="md:hidden p-2 -ml-2 rounded-full hover:bg-dark-800 transition-colors"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
-              <div className="relative">
+              <div className="relative flex-shrink-0">
                 <ContactAvatar username={activeChat.username} userId={activeChat.userId} size="md" />
-                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-safe rounded-full border-2 border-dark-950" />
+                <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-safe rounded-full border-2 border-dark-900" />
               </div>
-              <div>
-                <p className="font-semibold">{activeChat.username}</p>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate">{activeChat.username}</p>
                 <p className="text-xs text-safe flex items-center gap-1">
-                  <Lock className="w-3 h-3" /> E2E зашифровано
+                  <span className="w-1.5 h-1.5 rounded-full bg-safe" />
+                  онлайн
                 </p>
               </div>
+              <button className="p-2 rounded-full hover:bg-dark-800 transition-colors">
+                <Info className="w-5 h-5 text-dark-400" />
+              </button>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
+            {/* Messages - Telegram style (fixed input, scrollable area) */}
+            <div 
+              className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5 scroll-smooth"
+              style={{ scrollBehavior: 'smooth' }}
+            >
               {currentMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-                  <div className="w-16 h-16 rounded-3xl bg-accent/10 border border-accent/20 flex items-center justify-center">
-                    <Lock className="w-8 h-8 text-accent" />
+                  <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
+                    <Lock className="w-7 h-7 text-accent" />
                   </div>
                   <div>
-                    <p className="font-semibold text-dark-300">Чат защищён</p>
-                    <p className="text-sm text-dark-500 mt-1">
-                      Сообщения шифруются на твоём устройстве.<br />Никто кроме вас двоих не может их прочитать.
+                    <p className="font-semibold text-dark-300 text-sm">Чат защищён</p>
+                    <p className="text-xs text-dark-500 mt-1 px-4">
+                      Сообщения шифруются на ваших устройствах. Ни сервер, ни третьи лица не могут их прочитать.
                     </p>
                   </div>
                 </div>
@@ -444,44 +449,48 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
               {currentMessages.map((msg, i) => {
                 const prev = currentMessages[i - 1]
                 const showTime = !prev || msg.timestamp - prev.timestamp > 60000
+                const showAvatar = !msg.mine && (!prev || prev.mine || msg.from !== prev.from)
                 return (
                   <MessageBubble
                     key={msg.id}
                     message={msg}
                     showTime={showTime}
+                    showAvatar={showAvatar}
+                    activeChat={activeChat}
                   />
                 )
               })}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
-            <div className="p-4 border-t border-dark-800">
-              <div className="flex items-center gap-2 bg-dark-800 rounded-2xl px-4 py-2 border border-dark-700 focus-within:border-accent/50 transition-colors">
+            {/* Input - Telegram style */}
+            <div className="p-2 md:p-3 border-t border-dark-800 bg-dark-900/95 backdrop-blur-md safe-area-bottom">
+              <div className="flex items-end gap-1.5 md:gap-2 bg-dark-800 rounded-2xl md:rounded-3xl px-3 md:px-4 py-2 border border-dark-700 focus-within:border-accent/50 transition-colors min-h-[44px] md:min-h-[48px]">
                 <input
                   ref={inputRef}
                   type="text"
                   value={inputText}
                   onChange={e => setInputText(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                  placeholder="Сообщение (зашифровано)..."
-                  className="flex-1 bg-transparent outline-none text-dark-100 placeholder-dark-600 text-sm"
+                  placeholder="Сообщение..."
+                  className="flex-1 bg-transparent outline-none text-dark-100 placeholder-dark-600 text-base md:text-sm py-1.5 px-1 min-h-[24px]"
+                  style={{ fontSize: '16px' }} // Prevents zoom on iOS
                 />
                 <button
                   onClick={sendMessage}
                   disabled={!inputText.trim()}
                   className={clsx(
-                    'p-2 rounded-xl transition-all duration-200 active:scale-90',
+                    'p-2.5 md:p-2 rounded-xl md:rounded-lg transition-all duration-200 active:scale-90 flex-shrink-0',
                     inputText.trim()
                       ? 'bg-accent hover:bg-accent-hover text-white'
                       : 'text-dark-600 cursor-not-allowed'
                   )}
                 >
-                  <Send className="w-4 h-4" />
+                  <Send className="w-5 h-5 md:w-4 md:h-4" />
                 </button>
               </div>
-              <p className="text-center text-xs text-dark-700 mt-2 flex items-center justify-center gap-1">
-                <Lock className="w-3 h-3" /> Шифрование AES-256-GCM + ECDH P-256
+              <p className="text-center text-[10px] md:text-xs text-dark-700 mt-1.5 flex items-center justify-center gap-1">
+                <Lock className="w-3 h-3" /> AES-256-GCM + ECDH P-256
               </p>
             </div>
           </>
@@ -497,7 +506,7 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
             </p>
             <div className="grid grid-cols-3 gap-3 mt-8 w-full max-w-sm">
               {[
-                ['🔒', 'E2E AES-256', 'Военный уровень'],
+                ['🔒', 'E2E AES-256', 'Банковский стандарт'],
                 ['👤', 'Анонимность', 'Без регистрации'],
                 ['🚫', 'Нет логов', 'Чисто и безопасно'],
               ].map(([emoji, title, sub]) => (
