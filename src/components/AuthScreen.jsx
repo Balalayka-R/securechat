@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Shield, Zap, Lock, Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { Shield, Zap, Lock, Eye, EyeOff, RefreshCw, Key, Copy, Check } from 'lucide-react'
 import { generateKeyPair, saveKeysToStorage, getKeyFingerprint } from '../lib/crypto'
 import { generateAnonUsername, generateUserId, saveIdentity } from '../lib/identity'
+import { clearAllData } from '../lib/storage'
 import clsx from 'clsx'
 
 export default function AuthScreen({ onAuth }) {
@@ -11,6 +12,9 @@ export default function AuthScreen({ onAuth }) {
   const [step, setStep] = useState('form')
   const [fingerprint, setFingerprint] = useState('')
   const [pendingData, setPendingData] = useState(null)
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [passwordCopied, setPasswordCopied] = useState(false)
 
   const handleGenerate = () => {
     setUsername(generateAnonUsername())
@@ -37,8 +41,16 @@ export default function AuthScreen({ onAuth }) {
   const handleConfirm = () => {
     const { identity, publicKeyJwk, privateKeyJwk } = pendingData
     saveKeysToStorage(publicKeyJwk, privateKeyJwk)
-    saveIdentity(identity)
-    onAuth(identity, { publicKeyJwk, privateKeyJwk })
+    saveIdentity({ ...identity, password }) // Save password with identity for auto-decrypt
+    onAuth(identity, { publicKeyJwk, privateKeyJwk }, password)
+  }
+
+  const generatePassword = () => {
+    const words = ['alpha', 'beta', 'gamma', 'delta', 'echo', 'fox', 'ghost', 'hydra', 'iris', 'jade']
+    const nums = Math.floor(1000 + Math.random() * 9000)
+    const word1 = words[Math.floor(Math.random() * words.length)]
+    const word2 = words[Math.floor(Math.random() * words.length)]
+    return `${word1}-${word2}-${nums}`
   }
 
   if (step === 'fingerprint') {
@@ -49,19 +61,48 @@ export default function AuthScreen({ onAuth }) {
             <Lock className="w-8 h-8 text-safe" />
           </div>
           <h2 className="text-xl font-bold text-center mb-2">Твой отпечаток ключа</h2>
-          <p className="text-dark-400 text-sm text-center mb-6">
-            Это уникальный идентификатор твоего шифрования. Поделись им с собеседником для проверки подлинности.
-          </p>
-          <div className="bg-dark-900 rounded-xl p-4 mb-6 font-mono text-xs text-safe text-center leading-relaxed break-all border border-safe/20">
-            {fingerprint}
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-white mb-2">Ваш ключ готов</h2>
+            <p className="text-sm text-dark-400">Запишите пароль — без него сообщения не восстановить</p>
           </div>
-          <div className="flex items-start gap-3 bg-accent/10 rounded-xl p-4 mb-6 border border-accent/20">
-            <Shield className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-dark-300">
-              Приватный ключ хранится <strong className="text-white">только на твоём устройстве</strong>. 
-              Сервер никогда не видит твои сообщения.
+
+          {!password && (
+            <button
+              onClick={() => setPassword(generatePassword())}
+              className="w-full mb-4 py-3 px-4 bg-dark-800 hover:bg-dark-700 rounded-xl flex items-center justify-center gap-2 text-sm font-medium transition-colors"
+            >
+              <Key className="w-4 h-4" />
+              Сгенерировать пароль для шифрования
+            </button>
+          )}
+
+          {password && (
+            <div className="bg-accent/10 border border-accent/20 rounded-xl p-4 mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-accent font-medium">Пароль шифрования</span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(password)
+                    setPasswordCopied(true)
+                    setTimeout(() => setPasswordCopied(false), 2000)
+                  }}
+                  className="p-1.5 rounded hover:bg-dark-800 transition-colors"
+                >
+                  {passwordCopied ? <Check className="w-3.5 h-3.5 text-safe" /> : <Copy className="w-3.5 h-3.5 text-accent" />}
+                </button>
+              </div>
+              <p className="font-mono text-sm text-white break-all">{password}</p>
+              <p className="text-xs text-dark-500 mt-2">⚠️ Сохраните этот пароль! Без него нельзя прочитать историю сообщений.</p>
+            </div>
+          )}
+
+          <div className="bg-dark-900 rounded-xl p-4 mb-6 border border-dark-700">
+            <p className="text-xs text-dark-500 mb-2 text-center">Отпечаток ключа E2E</p>
+            <p className="font-mono text-xs text-safe break-all text-center leading-relaxed">
+              {fingerprint}
             </p>
           </div>
+
           <button onClick={handleConfirm} className="btn-primary w-full text-base py-3">
             Понял, войти в чат
           </button>

@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Shield, Send, Plus, LogOut, Users, Lock, Wifi, WifiOff, Search, X, Info } from 'lucide-react'
+import { Shield, Send, Plus, LogOut, Users, Lock, Wifi, WifiOff, Search, X, Info, Copy, Link2, UserPlus, Check } from 'lucide-react'
 import { connectSocket, getSocket, disconnectSocket } from '../lib/socket'
 import { deriveSharedKey, encryptMessage, decryptMessage, getKeyFingerprint } from '../lib/crypto'
 import { clearKeys } from '../lib/crypto'
-import { clearIdentity, getAvatarColor, getInitials } from '../lib/identity'
+import { clearIdentity, getAvatarColor, getInitials, loadIdentity } from '../lib/identity'
+import { saveMessages, loadMessages, saveContact, loadContacts, clearAllData } from '../lib/storage'
 import ContactAvatar from './ContactAvatar'
 import MessageBubble from './MessageBubble'
 import clsx from 'clsx'
 
-export default function ChatScreen({ identity, keys, onLogout }) {
+export default function ChatScreen({ identity, keys, onLogout, password }) {
   const [connected, setConnected] = useState(false)
   const [onlineUsers, setOnlineUsers] = useState([])
   const [activeChat, setActiveChat] = useState(null)
@@ -18,14 +19,53 @@ export default function ChatScreen({ identity, keys, onLogout }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [showInfo, setShowInfo] = useState(false)
   const [mobileView, setMobileView] = useState('list')
+  const [showInvite, setShowInvite] = useState(false)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false)
+  const [connectId, setConnectId] = useState('')
+  const [showConnect, setShowConnect] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
+    // Load saved contacts and messages
+    const loadSavedData = async () => {
+      try {
+        const savedContacts = await loadContacts(password)
+        if (savedContacts.length > 0) {
+          setOnlineUsers(savedContacts)
+        }
+        
+        // Load messages for each contact
+        for (const contact of savedContacts) {
+          const savedMessages = await loadMessages(contact.userId, password)
+          if (savedMessages.length > 0) {
+            setChats(prev => ({
+              ...prev,
+              [contact.userId]: {
+                userId: contact.userId,
+                username: contact.username,
+                publicKey: contact.publicKey,
+                messages: savedMessages
+              }
+            }))
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load saved data:', e)
+      }
+    }
+    loadSavedData()
+
     const socket = connectSocket(identity.userId, identity.username, keys.publicKeyJwk)
 
     socket.on('connect', () => setConnected(true))
     socket.on('disconnect', () => setConnected(false))
+    
+    // Check notification permission
+    if ('Notification' in window) {
+      setNotificationsEnabled(Notification.permission === 'granted')
+    }
 
     socket.on('users:online', (users) => {
       setOnlineUsers(users.filter(u => u.userId !== identity.userId))
@@ -54,19 +94,53 @@ export default function ChatScreen({ identity, keys, onLogout }) {
         }
         const text = await decryptMessage(sk, encryptedText)
         const msg = { id: Date.now(), from, fromUsername, text, timestamp, mine: false }
-        setChats(prev => ({
-          ...prev,
-          [from]: {
-            userId: from,
-            username: fromUsername,
-            publicKey,
-            messages: [...(prev[from]?.messages || []), msg]
+        setChats(prev => {
+          const updated = {
+            ...prev,
+            [from]: {
+              userId: from,
+              username: fromUsername,
+              publicKey,
+              messages: [...(prev[from]?.messages || []), msg]
+            }
           }
-        }))
+          // Save messages asynchronously
+          saveMessages(from, updated[from].messages, password).catch(console.error)
+          return updated
+        })
+        
+        // Show notification if app not focused
+        if (document.hidden && Notification.permission === 'granted') {
+          new Notification('SecureChat', {
+            body: `Новое сообщение от ${fromUsername}`,
+            icon: '/icon-192.png',
+            tag: from
+          })
+        }
       } catch (e) {
         console.error('Decrypt error:', e)
       }
     })
+
+    socket.on('user:found', async (user) => {
+      if (user.userId === identity.userId) return
+      setOnlineUsers(prev => {
+        if (prev.find(u => u.userId === user.userId)) return prev
+        return [...prev, user]
+      })
+      await openChat(user)
+    })
+
+    socket.on('user:notfound', ({ targetId }) => {
+      alert(`Пользователь ${targetId.slice(0, 8)}... не найден (офлайн)`)
+    })
+
+    const urlParams = new URLSearchParams(window.location.search)
+    const connectId = urlParams.get('connect')
+    if (connectId) {
+      socket.emit('user:request', { targetId: connectId })
+      window.history.replaceState({}, '', window.location.pathname)
+    }
 
     return () => disconnectSocket()
   }, [])
@@ -88,6 +162,9 @@ export default function ChatScreen({ identity, keys, onLogout }) {
     setActiveChat(user)
     setMobileView('chat')
     setTimeout(() => inputRef.current?.focus(), 100)
+    
+    // Save contact to storage
+    await saveContact(user, password)
   }
 
   const sendMessage = async () => {
@@ -116,18 +193,23 @@ export default function ChatScreen({ identity, keys, onLogout }) {
         timestamp: msg.timestamp
       })
 
-      setChats(prev => ({
-        ...prev,
-        [activeChat.userId]: {
-          ...prev[activeChat.userId],
-          userId: activeChat.userId,
-          username: activeChat.username,
-          messages: [...(prev[activeChat.userId]?.messages || []), msg]
+      setChats(prev => {
+        const updated = {
+          ...prev,
+          [activeChat.userId]: {
+            userId: activeChat.userId,
+            username: activeChat.username,
+            publicKey: activeChat.publicKey,
+            messages: [...(prev[activeChat.userId]?.messages || []), msg]
+          }
         }
-      }))
+        // Save sent messages too
+        saveMessages(activeChat.userId, updated[activeChat.userId].messages, password).catch(console.error)
+        return updated
+      })
       setInputText('')
     } catch (e) {
-      console.error('Encrypt error:', e)
+      console.error('Send error:', e)
     }
   }
 
@@ -177,11 +259,62 @@ export default function ChatScreen({ identity, keys, onLogout }) {
               <p className="font-medium text-sm truncate">{identity.username}</p>
               <p className="text-xs text-dark-500">Ты</p>
             </div>
-            <button onClick={() => setShowInfo(!showInfo)} className="ml-auto p-1.5 rounded-lg hover:bg-dark-700 transition-colors">
+            <button onClick={() => setShowInvite(!showInvite)} className="ml-auto p-1.5 rounded-lg hover:bg-dark-700 transition-colors" title="Пригласить">
+              <UserPlus className="w-4 h-4 text-accent" />
+            </button>
+            <button onClick={() => setShowInfo(!showInfo)} className="p-1.5 rounded-lg hover:bg-dark-700 transition-colors">
               <Info className="w-4 h-4 text-dark-400" />
             </button>
           </div>
 
+          {showInvite && (
+            <div className="mt-2 p-3 rounded-xl bg-accent/10 border border-accent/20 text-xs animate-fade-in">
+              <p className="text-dark-300 font-medium mb-2 flex items-center gap-1">
+                <Link2 className="w-3 h-3 text-accent" /> Пригласить по ID
+              </p>
+              <div className="flex items-center gap-2 mb-2">
+                <code className="flex-1 bg-dark-900 rounded px-2 py-1 font-mono text-dark-200 text-[10px] break-all">
+                  {identity.userId}
+                </code>
+                <button
+                  onClick={() => {
+                    const link = `${window.location.origin}?connect=${identity.userId}`
+                    navigator.clipboard.writeText(link)
+                    setInviteLinkCopied(true)
+                    setTimeout(() => setInviteLinkCopied(false), 2000)
+                  }}
+                  className="p-1.5 rounded bg-dark-800 hover:bg-dark-700 transition-colors"
+                  title="Копировать ссылку"
+                >
+                  {inviteLinkCopied ? <Check className="w-3 h-3 text-safe" /> : <Copy className="w-3 h-3 text-dark-400" />}
+                </button>
+              </div>
+              <div className="border-t border-dark-700/50 pt-2 mt-2">
+                <p className="text-dark-400 mb-1.5">Подключиться по ID:</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={connectId}
+                    onChange={e => setConnectId(e.target.value)}
+                    placeholder="Вставь ID друга..."
+                    className="flex-1 bg-dark-900 border border-dark-700 rounded px-2 py-1 text-xs outline-none focus:border-accent/50"
+                  />
+                  <button
+                    onClick={() => {
+                      if (connectId.trim()) {
+                        const socket = getSocket()
+                        socket?.emit('user:request', { targetId: connectId.trim() })
+                        setConnectId('')
+                      }
+                    }}
+                    className="px-2 py-1 bg-accent hover:bg-accent-hover rounded text-white text-xs font-medium transition-colors"
+                  >
+                    Найти
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {showInfo && (
             <div className="mt-2 p-3 rounded-xl bg-dark-900 border border-dark-700 text-xs text-dark-400 animate-fade-in">
               <p className="text-dark-300 font-medium mb-1">ID: <span className="font-mono text-dark-500">{identity.userId.slice(0, 16)}...</span></p>

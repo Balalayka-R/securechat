@@ -75,6 +75,24 @@ io.on('connection', (socket) => {
     })
   })
 
+  socket.on('user:request', ({ targetId }) => {
+    const target = onlineUsers.get(targetId)
+    if (target) {
+      socket.emit('user:found', {
+        userId: target.userId,
+        username: target.username,
+        publicKey: target.publicKey
+      })
+      io.to(target.socketId).emit('user:found', {
+        userId: user.userId,
+        username: user.username,
+        publicKey: user.publicKey
+      })
+    } else {
+      socket.emit('user:notfound', { targetId })
+    }
+  })
+
   socket.on('disconnect', () => {
     onlineUsers.delete(socket.userId)
     socket.broadcast.emit('user:left', { userId: socket.userId })

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate SecureChat Icons</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    canvas { border: 1px solid #ddd; margin: 5px; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>SecureChat Icon Generator</h1>
+  <p>Click button to generate and download all PWA icons</p>
+  <button onclick="generateAll()">Generate & Download All Icons</button>
+  <div id="canvases"></div>
+
+  <script>
+    const sizes = [72, 96, 128, 144, 152, 192, 384, 512]
+    
+    function drawIcon(canvas, size) {
+      const ctx = canvas.getContext('2d')
+      const scale = size / 100
+      
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size)
+      gradient.addColorStop(0, '#6366f1')
+      gradient.addColorStop(1, '#8b5cf6')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, size, size)
+      
+      // Shield shape
+      ctx.beginPath()
+      ctx.moveTo(size/2, 8 * scale)
+      ctx.lineTo(size - 12 * scale, 22 * scale)
+      ctx.lineTo(size - 12 * scale, 48 * scale)
+      ctx.quadraticCurveTo(size - 12 * scale, 72 * scale, size/2, size - 8 * scale)
+      ctx.quadraticCurveTo(12 * scale, 72 * scale, 12 * scale, 48 * scale)
+      ctx.lineTo(12 * scale, 22 * scale)
+      ctx.closePath()
+      
+      ctx.fillStyle = 'white'
+      ctx.fill()
+      
+      // Checkmark
+      ctx.beginPath()
+      ctx.lineWidth = 6 * scale
+      ctx.strokeStyle = '#6366f1'
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.moveTo(36 * scale, 50 * scale)
+      ctx.lineTo(46 * scale, 60 * scale)
+      ctx.lineTo(64 * scale, 40 * scale)
+      ctx.stroke()
+    }
+    
+    function generateAll() {
+      const container = document.getElementById('canvases')
+      container.innerHTML = ''
+      
+      sizes.forEach(size => {
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        drawIcon(canvas, size)
+        container.appendChild(canvas)
+        
+        // Download
+        const link = document.createElement('a')
+        link.download = `icon-${size}.png`
+        link.href = canvas.toDataURL('image/png')
+        link.click()
+      })
+    }
+  </script>
+</body>
+</html>

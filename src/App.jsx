@@ -3,30 +3,36 @@ import AuthScreen from './components/AuthScreen'
 import ChatScreen from './components/ChatScreen'
 import { loadIdentity } from './lib/identity'
 import { loadKeysFromStorage } from './lib/crypto'
+import { clearAllData } from './lib/storage'
 
 export default function App() {
   const [identity, setIdentity] = useState(null)
   const [keys, setKeys] = useState(null)
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const savedIdentity = loadIdentity()
     const savedKeys = loadKeysFromStorage()
-    if (savedIdentity && savedKeys) {
+    if (savedIdentity && savedKeys && savedIdentity.password) {
       setIdentity(savedIdentity)
       setKeys(savedKeys)
+      setPassword(savedIdentity.password)
     }
     setLoading(false)
   }, [])
 
-  const handleAuth = (newIdentity, newKeys) => {
+  const handleAuth = (newIdentity, newKeys, newPassword) => {
     setIdentity(newIdentity)
     setKeys(newKeys)
+    setPassword(newPassword)
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await clearAllData()
     setIdentity(null)
     setKeys(null)
+    setPassword('')
   }
 
   if (loading) {
@@ -44,5 +50,5 @@ export default function App() {
     return <AuthScreen onAuth={handleAuth} />
   }
 
-  return <ChatScreen identity={identity} keys={keys} onLogout={handleLogout} />
+  return <ChatScreen identity={identity} keys={keys} onLogout={handleLogout} password={password} />
 }
