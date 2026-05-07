@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Shield, Send, Plus, LogOut, Users, Lock, Wifi, WifiOff, Search, X, Info, Copy, Link2, UserPlus, Check } from 'lucide-react'
 import { connectSocket, getSocket, disconnectSocket } from '../lib/socket'
 import { deriveSharedKey, encryptMessage, decryptMessage, getKeyFingerprint } from '../lib/crypto'
@@ -435,33 +435,38 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
               className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5 scroll-smooth"
               style={{ scrollBehavior: 'smooth' }}
             >
-              {currentMessages.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
-                    <Lock className="w-7 h-7 text-accent" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-dark-300 text-sm">Чат защищён</p>
-                    <p className="text-xs text-dark-500 mt-1 px-4">
-                      Сообщения шифруются на ваших устройствах. Ни сервер, ни третьи лица не могут их прочитать.
-                    </p>
-                  </div>
-                </div>
-              )}
-              {currentMessages.map((msg, i) => {
-                const prev = currentMessages[i - 1]
-                const showTime = !prev || msg.timestamp - prev.timestamp > 60000
-                const showAvatar = !msg.mine && (!prev || prev.mine || msg.from !== prev.from)
-                return (
-                  <MessageBubble
-                    key={msg.id}
-                    message={msg}
-                    showTime={showTime}
-                    showAvatar={showAvatar}
-                    activeChat={activeChat}
-                  />
-                )
-              })}
+              {(() => {
+                const messages = chats[activeChat.userId]?.messages || []
+                if (messages.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-full text-center gap-3">
+                      <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
+                        <Lock className="w-7 h-7 text-accent" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-dark-300 text-sm">Чат защищён</p>
+                        <p className="text-xs text-dark-500 mt-1 px-4">
+                          Сообщения шифруются на ваших устройствах. Ни сервер, ни третьи лица не могут их прочитать.
+                        </p>
+                      </div>
+                    </div>
+                  )
+                }
+                return messages.map((msg, i) => {
+                  const prev = messages[i - 1]
+                  const showTime = !prev || msg.timestamp - prev.timestamp > 60000
+                  const showAvatar = !msg.mine && (!prev || prev.mine || msg.from !== prev.from)
+                  return (
+                    <MessageBubble
+                      key={msg.id}
+                      message={msg}
+                      showTime={showTime}
+                      showAvatar={showAvatar}
+                      activeChat={activeChat}
+                    />
+                  )
+                })
+              })()}
               <div ref={messagesEndRef} />
             </div>
 
