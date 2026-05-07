@@ -27,38 +27,8 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
+  // Socket connection effect - always runs
   useEffect(() => {
-    if (!password) return // Skip loading if no password
-    
-    // Load saved contacts and messages
-    const loadSavedData = async () => {
-      try {
-        const savedContacts = await loadContacts(password)
-        if (savedContacts.length > 0) {
-          setOnlineUsers(savedContacts)
-        }
-        
-        // Load messages for each contact
-        for (const contact of savedContacts) {
-          const savedMessages = await loadMessages(contact.userId, password)
-          if (savedMessages.length > 0) {
-            setChats(prev => ({
-              ...prev,
-              [contact.userId]: {
-                userId: contact.userId,
-                username: contact.username,
-                publicKey: contact.publicKey,
-                messages: savedMessages
-              }
-            }))
-          }
-        }
-      } catch (e) {
-        console.error('Failed to load saved data:', e)
-      }
-    }
-    loadSavedData()
-
     const socket = connectSocket(identity.userId, identity.username, keys.publicKeyJwk)
 
     socket.on('connect', () => setConnected(true))
@@ -146,6 +116,43 @@ export default function ChatScreen({ identity, keys, onLogout, password }) {
 
     return () => disconnectSocket()
   }, [])
+
+  // Load saved data effect - only when password available
+  useEffect(() => {
+    if (!password) return
+    
+    const loadSavedData = async () => {
+      try {
+        const savedContacts = await loadContacts(password)
+        if (savedContacts.length > 0) {
+          setOnlineUsers(prev => {
+            // Merge with existing to avoid duplicates
+            const existing = new Set(prev.map(u => u.userId))
+            const newContacts = savedContacts.filter(c => !existing.has(c.userId))
+            return [...prev, ...newContacts]
+          })
+        }
+        
+        for (const contact of savedContacts) {
+          const savedMessages = await loadMessages(contact.userId, password)
+          if (savedMessages.length > 0) {
+            setChats(prev => ({
+              ...prev,
+              [contact.userId]: {
+                userId: contact.userId,
+                username: contact.username,
+                publicKey: contact.publicKey,
+                messages: savedMessages
+              }
+            }))
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load saved data:', e)
+      }
+    }
+    loadSavedData()
+  }, [password])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
